@@ -1,0 +1,19 @@
+# Web UI framework
+gradio>=3.50.0
+
+# Data handling and visualization
+pandas>=1.5.0
+plotly>=5.0.0
+
+# Stock data API
+akshare>=1.10.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# LangChain components
+langchain-core>=0.1.0
+langchain-deepseek>=0.0.1
+
+# Time series forecasting
+prophet>=1.1.0
