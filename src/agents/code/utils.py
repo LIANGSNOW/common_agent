@@ -61,20 +61,22 @@ def extract_and_combine_codeblocks(text: str) -> str:
     if not code_blocks:
         return ""
 
-    # Process each codeblock
     processed_blocks: list[str] = []
     for block in code_blocks:
-        # Strip leading and trailing whitespace
-        block: str = block.strip()
+        block = block.strip()
 
-        # If the first line looks like a language identifier, remove it
-        lines: list[str] = block.split("\n")
-        if lines and (not lines[0].strip() or " " not in lines[0].strip()):
-            # First line is empty or likely a language identifier (no spaces)
-            block = "\n".join(lines[1:])
+        # Strip a leading markdown fence (``` or ```python), even if the LLM
+        # wrapped the code inside <execute> with fences.
+        if block.startswith("```"):
+            newline_idx = block.find("\n")
+            block = block[newline_idx + 1:] if newline_idx != -1 else ""
+
+        # Strip a trailing ``` fence — this was the source of the
+        # SyntaxError: lines[-1] == "```" reaching exec().
+        stripped = block.rstrip()
+        if stripped.endswith("```"):
+            block = stripped[:-3].rstrip()
 
         processed_blocks.append(block)
 
-    # Combine all codeblocks with newlines between them
-    combined_code: str = "\n\n".join(processed_blocks)
-    return combined_code
+    return "\n\n".join(processed_blocks)

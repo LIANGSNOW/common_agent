@@ -43,17 +43,24 @@ DEFAULT_PROMPT_TEMPLATE = """
 
 <formatSpecifications>
 **1. 代码执行格式 (MANDATORY):**
-        
-  思考需要做什么，计划执行步骤
 
-  ```python
+  思考需要做什么，计划执行步骤。然后用 `<execute>...</execute>` 包裹**纯 Python 代码**，里面**不要再嵌 markdown 围栏（```）**——围栏只用于 markdown 文档，不是代码语法的一部分。
+
+  正确：
+
   <execute>
-  # Your Python code here
-  import pandas as pd
-  df = pd.read_csv('data.csv')
-  print(df.head())
+  import math
+  print(math.ceil(11.875))
   </execute>
+
+  错误（围栏会被当成 Python 字符送进 exec，导致 SyntaxError）：
+
+  &lt;execute&gt;
+  ```python
+  import math
+  print(math.ceil(11.875))
   ```
+  &lt;/execute&gt;
         
   **2. 最终答案格式:**
   

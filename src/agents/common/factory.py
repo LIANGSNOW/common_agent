@@ -37,7 +37,7 @@ def _default_workspace() -> str:
 def create_common_agent(
     model: BaseChatModel | None = None,
     *,
-    recursion_limit: int = 20,
+    recursion_limit: int = 60,
     workspace_dir: str | Path | None = None,
 ):
     selected_model = model or create_default_model()
@@ -105,10 +105,14 @@ def create_common_agent(
             script=None,
             tool_command=None,
             context={},
-            remaining_steps=recursion_limit,
             execution_summary=None,
         )
-        result = codeact.invoke(codeact_state)
+        # recursion_limit must be passed via config; RemainingSteps managed value
+        # in CodeActState is auto-computed by langgraph from this value.
+        result = codeact.invoke(
+            codeact_state,
+            config={"recursion_limit": recursion_limit},
+        )
         result_messages = result.get("messages", [])
         visible_messages = visible_codeact_messages(result_messages)
         final_message = result_messages[-1] if result_messages else AIMessage(content="No result produced.")
