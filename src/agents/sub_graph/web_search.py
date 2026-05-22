@@ -8,7 +8,12 @@ from langgraph.types import Send
 from typing import TypedDict, Annotated
 import operator
 import datetime
+import json
+import logging
+
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 PLANNER_PROMPT = """你是一个研究型 agent，目标是为用户问题生成用于搜索引擎的高质量查询。
@@ -27,14 +32,6 @@ PLANNER_PROMPT = """你是一个研究型 agent，目标是为用户问题生成
 现在的时间：{date}
 """
 
-REWRITE_PROMPT = """基于上下文重写搜索问题，生成 2-3 个精确的搜索查询。
-
-【子问题意图】{intent}
-【原始查询】{queries}
-【已有上下文】{context}
-【用户需求】{user_query}
-"""
-
 SUMMARIZE_PROMPT = """根据搜索到的原始文档，针对子问题进行总结。
 
 【子问题】{intent}
@@ -47,6 +44,41 @@ SUMMARIZE_PROMPT = """根据搜索到的原始文档，针对子问题进行总�
 - 从文档中提取关键信息，生成总结,需要控制长度，专注于子问题和用户需求
 - 标注关键数据、时间、来源
 - 直接输出总结文本，不要标题
+"""
+
+EVALUATE_PROMPT = """
+你是 deep research agent 的评估模块。
+
+你的任务不是重新规划整个研究，而是判断当前搜索结果是否已经足够回答用户问题。
+如果不足，只针对缺失部分生成少量补充搜索查询。
+
+【用户初始问题】
+{question}
+
+【研究计划】
+{plan}
+
+【搜索结果】
+{search_results}
+
+【现在日期】
+{date}
+
+请从以下角度评估：
+1. Coverage：是否覆盖用户问题的主要维度
+2. Directness：是否直接回答用户问题
+3. Evidence quality：来源是否足够可信、具体、新近
+4. Conflict：是否存在明显矛盾或需要验证的信息
+5. Gaps：是否存在必须补充搜索的信息缺口
+
+重要规则：
+- 不要因为还能搜索更多就判定不足；只有影响最终回答质量的缺口才需要继续搜索。
+- 不要重新做完整 research plan。
+- 如果当前信息基本足够，请 is_sufficient=true，并且 followup_queries 为空。
+- 如果不足，请说明缺口，并生成 不超过3个高价值 follow-up search queries。
+- follow-up queries 应该具体、可搜索、避免重复已有 queries，内部结构是:
+    2. 可独立搜索的子问题(intent)
+    3. 为每个子问题生成 1-2 条搜索引擎查询(queries)
 """
 
 REPORT_PROMPT = """撰写研究报告。
@@ -74,28 +106,52 @@ class ResearchPlan(BaseModel):
     subquestions: list[SubQuestion]
 
 
-class Queries(BaseModel):
-    queries: list[str]
+class ResearchEvaluation(BaseModel):
+    is_sufficient: bool = Field(
+        ...,
+        description="当前搜索结果是否足够回答用户初始问题"
+    )
+    confidence: str = Field(
+        ...,
+        description="high / medium / low"
+    )
+    covered_aspects: list[str] = Field(
+        default_factory=list,
+        description="当前结果已经覆盖的方面"
+    )
+    missing_aspects: list[str] = Field(
+        default_factory=list,
+        description="仍然缺失且影响最终回答质量的方面"
+    )
+    followup_queries: list[SubQuestion]
+
 
 class WorkerState(MessagesState):
     subquestion: dict
     user_query: str
 
+
+
 class ResearchState(MessagesState):
     user_query: str
     research_plan: dict
-    subquestions:list[dict]
+    subquestions: list[dict]
     search_results: Annotated[list, operator.add]
-    current_index: int
+    evaluation: dict
+    followup_queries: list[dict]
+    iteration: int
     answer: str
 
 
+
 class research_agent:
+    MAX_ROUNDS = 2  # planner 后的首轮 + 最多 MAX_ROUNDS 轮 followup
+
     def __init__(self):
         self.llm = ChatDeepSeek(
             model="deepseek-chat",
             temperature=1,
-            max_tokens=1024,
+            max_tokens=4096,
             timeout=None,
             max_retries=2,
         )
@@ -111,14 +167,16 @@ class research_agent:
 
         structured = self.llm.with_structured_output(ResearchPlan)
         plan_result = structured.invoke(PLANNER_PROMPT.format(question=user_content, date=datetime.datetime.today()))
-        print(plan_result)
+        logger.info("research plan: %s", plan_result.model_dump())
         plan_data = plan_result.model_dump()
         return {
             "user_query": user_content,
             "research_plan": plan_data,
             "subquestions": plan_data["subquestions"],
-            "current_index": 0,
             "search_results": [],
+            "evaluation": {},
+            "followup_queries": [],
+            "iteration": 0,
         }
 
     def web_search(self, state: WorkerState):
@@ -127,67 +185,44 @@ class research_agent:
         intent = subquestion['intent']
         queries = subquestion['queries']
 
-
-        # queries = self._rewrite(intent, original_queries, messages, plan)
-        print(f"[Step 1] Rewritten queries: {queries}")
+        logger.info("queries: %s", queries)
 
         evidence = self._search(queries)
-        print(f"[Step 2] Found {len(evidence)} documents")
+        logger.info("found %d documents", len(evidence))
 
         summary = self._summarize(intent, evidence, user_query)
-        print(f"[Step 3] Summary generated")
+        logger.info("summary generated for intent: %s", intent)
 
-        # search_results.append({
-        #     "intent": intent,
-        #     "queries": original_queries,
-        #     "evidence": evidence,
-        # })
+        # 摘要后只保留轻量元数据，丢掉原文 content
+        sources = [
+            {
+                "title": e.get("title", ""),
+                "url": e.get("url", ""),
+                "date": e.get("date", "Unknown"),
+                "snippet": e.get("content", "")[:500],
+            }
+            for e in evidence
+        ]
 
-        # message = AIMessage(
-        #     content=f"**[Round {idx+1}/{len(subquestions)}] {intent}**\n\n{summary}"
-        # )
+        result = {
+            "intent": intent,
+            "queries": queries,
+            "summary": summary,
+            "evidence": sources,
+        }
 
-        # return {
-        #     "current_index": idx + 1,
-        #     "search_results": search_results,
-        #     "messages": [message],
-        # }
         message = AIMessage(content=f"**{intent}**\n\n{summary}")
 
         return {
-            "search_results": [
-                {
-                    "intent": intent,
-                    "queries": queries,
-                    "summary": summary,
-                    "evidence": evidence,
-                }
-            ],
+            "search_results": [result],
             "messages": [message],
         }
 
-    def fan_out(self,state: ResearchState):
+    def fan_out(self, state: ResearchState):
         return [
             Send("web_search", {"subquestion": sq, "user_query": state["user_query"]})
             for sq in state["subquestions"]
         ]
-    
-    def _rewrite(self, intent: str, original_queries: list, messages: list, user_query: str) -> list:
-        ai_messages = [m for m in messages if isinstance(m, AIMessage)]
-        context = '\n'.join([m.content[:200] for m in ai_messages[-5:]]) or '首次搜索，无上下文'
-
-        prompt = REWRITE_PROMPT.format(
-            intent=intent,
-            queries=', '.join(original_queries),
-            context=context,
-            user_query=user_query,
-        )
-        try:
-            result = self.llm.with_structured_output(Queries).invoke(prompt)
-            return result.queries or original_queries
-        except Exception as e:
-            print(f"Rewrite error: {e}")
-            return original_queries
 
     def _search(self, queries: list) -> list:
         evidence = []
@@ -202,7 +237,7 @@ class research_agent:
                         "date": r.get('published_date', 'Unknown'),
                     })
             except Exception as e:
-                print(f"Search error for '{query}': {e}")
+                logger.warning("search error for '%s': %s", query, e)
         return evidence
 
     def _summarize(self, intent: str, evidence: list, user_query: str) -> str:
@@ -213,23 +248,53 @@ class research_agent:
         try:
             return self.llm.invoke(prompt).content.strip()
         except Exception as e:
-            print(f"Summarize error: {e}")
+            logger.warning("summarize error: %s", e)
             return '\n'.join([f"- {ev['title']}" for ev in evidence[:5]])
 
     def should_continue(self, state: ResearchState):
-        subquestions = state['research_plan'].get('subquestions', [])
-        return "continue" if state['current_index'] < len(subquestions) else "end"
+        evaluation = state.get("evaluation", {})
+        followup_queries = state.get("followup_queries", [])
+        iteration = state.get("iteration", 0)
 
-    # def evaluate(self, state: ResearchState):
-    #     user_query = state['user_query']
-    #     search_results = state['search_results']
-    #     prompt = EVALUATE_PROMPT.format(
-    #         plan=plan,
-    #         search_results='\n\n'.join([json.dumps(r) for r in search_results]),
-    #     )
-    #     try:
-    #         return self.llm.invoke(prompt).content.strip()
-    #     except Exception as e:
+        if iteration >= self.MAX_ROUNDS:
+            return "report"
+        if evaluation.get("is_sufficient") or not followup_queries:
+            return "report"
+        return "continue"
+
+    def prepare_followup(self, state: ResearchState):
+        return {
+            "subquestions": state.get("followup_queries", []),
+            "iteration": state.get("iteration", 0) + 1,
+        }
+    
+    def evaluate(self, state: ResearchState):
+        user_query = state['user_query']
+        plan = state['research_plan']
+
+        structured = self.llm.with_structured_output(ResearchEvaluation)
+        search_results_for_eval = [
+            {
+                "intent": r.get("intent", ""),
+                "queries": r.get("queries", []),
+                "summary": r.get("summary", ""),
+                "sources": r.get("evidence", [])[:5],
+            }
+            for r in state.get("search_results", [])
+        ]
+        prompt = EVALUATE_PROMPT.format(
+            question=user_query,
+            plan=json.dumps(plan, ensure_ascii=False, indent=2),
+            search_results=json.dumps(search_results_for_eval, ensure_ascii=False, indent=2),
+            date=datetime.datetime.today(),
+        )
+        result = structured.invoke(prompt)
+        logger.info("evaluation: %s", result.model_dump())
+
+        return {
+            "evaluation": result.model_dump(),
+            "followup_queries": [q.model_dump() for q in result.followup_queries],
+        }
 
 
     def report(self, state: ResearchState):
@@ -244,18 +309,21 @@ class research_agent:
             error = "未收集到任何研究信息"
             return {"answer": error, "messages": [AIMessage(content=error)]}
 
-        all_evidence = []
+        all_sources = []
         for r in search_results:
-            all_evidence.extend(r.get('evidence', []))
+            all_sources.extend(r.get('evidence', []))
         sources = '\n'.join(
-            [f"- {e['title']} ({e.get('date', 'Unknown')})" for e in all_evidence[:30]]
+            [
+                f"- [{s.get('title', '')}]({s.get('url', '')}) ({s.get('date', 'Unknown')})"
+                for s in all_sources[:30]
+            ]
         )
 
         prompt = REPORT_PROMPT.format(
             user_query=user_query,
             research_goal=research_goal,
             summaries=summaries,
-            n_sources=len(all_evidence),
+            n_sources=len(all_sources),
             sources=sources,
         )
         try:
@@ -269,17 +337,20 @@ class research_agent:
         builder = StateGraph(ResearchState)
         builder.add_node("planner", self.planner)
         builder.add_node("web_search", self.web_search)
+        builder.add_node("evaluate", self.evaluate)
+        builder.add_node("prepare_followup", self.prepare_followup)
         builder.add_node("report", self.report)
 
         builder.add_edge(START, "planner")
         builder.add_conditional_edges("planner", self.fan_out, ["web_search"])
 
-        # builder.add_conditional_edges(
-        #     "web_search",
-        #     self.should_continue,
-        #     {"continue": "web_search", "end": "report"},
-        # )
-        builder.add_edge("web_search", "report")
+        builder.add_edge("web_search", "evaluate")
+        builder.add_conditional_edges(
+            "evaluate",
+            self.should_continue,
+            {"continue": "prepare_followup", "report": "report"},
+        )
+        builder.add_conditional_edges("prepare_followup", self.fan_out, ["web_search"])
 
         builder.add_edge("report", END)
 
@@ -287,10 +358,24 @@ class research_agent:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    )
     print('start')
     agent = research_agent().create_agent()
     state: ResearchState = ResearchState(
-        messages=[HumanMessage(content="我想了解最近的人工智能发展趋势")],
+        messages=[HumanMessage(content="对比 NVIDIA Blackwell B200、AMD MI325X、华为昇腾 910C、Groq LPU v2 这四款 2025-2026 年的 AI 推理芯片，包括：FP8/INT8 算力、HBM 容量与带宽、单卡功耗、tokens/J 能效比、典型推理工作负载（Llama-70B、DeepSeek-V3）下的实测吞吐、以及单位 token 成本。")],
     )
-    for chunk in agent.stream(input=state, stream_mode="values"):
-        chunk["messages"][-1].pretty_print()
+    for chunk in agent.stream(input=state, stream_mode="updates"):
+        for node, update in chunk.items():
+            if not isinstance(update, dict):
+                continue
+            msgs = update.get("messages")
+            if not msgs:
+                continue
+            if not isinstance(msgs, list):
+                msgs = [msgs]
+            print(f"\n---- {node} ----")
+            for m in msgs:
+                m.pretty_print()
