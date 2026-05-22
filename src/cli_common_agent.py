@@ -1,9 +1,10 @@
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO
 
 from langchain_core.messages import HumanMessage
+from langgraph.types import Command
 
 from src.agents.common import create_common_agent
 
@@ -53,24 +54,78 @@ def _print_message(message, output_fn=None) -> None:
         print(_message_content(message))
 
 
-def _stream_values(agent, user_input: str):
-    yield from agent.stream(
-        {"messages": [HumanMessage(content=user_input)]},
-        stream_mode="values",
-    )
+def _format_interrupt(value: Any) -> str:
+    if not isinstance(value, dict):
+        return str(value)
+    kind = value.get("type")
+    if kind == "confirm_plan":
+        plan = value.get("plan", "")
+        question = value.get("question", "请确认 plan。")
+        return f"[需要确认 plan]\n{plan}\n\n{question}"
+    if kind == "ask_human":
+        question = value.get("question", "")
+        options = value.get("options") or []
+        if options:
+            options_text = "\n".join(f"  - {opt}" for opt in options)
+            return f"[Agent 询问]\n{question}\n候选答案：\n{options_text}"
+        return f"[Agent 询问]\n{question}"
+    return str(value)
 
 
-def run_once(user_input: str, agent=None, history_writer: ChatHistoryWriter | None = None, output_fn=None):
-    selected_agent = agent or create_common_agent()
+def _extract_pending_interrupts(agent, config: dict) -> list[Any]:
+    state = agent.get_state(config)
+    pending: list[Any] = []
+    for task in getattr(state, "tasks", ()) or ():
+        for itr in getattr(task, "interrupts", ()) or ():
+            pending.append(getattr(itr, "value", itr))
+    return pending
+
+
+def _stream_and_print(agent, payload, config, printed_count: int, output_fn=None) -> tuple[dict, int]:
     final_result: dict = {"messages": []}
-    printed_count = 0
-
-    for state in _stream_values(selected_agent, user_input):
+    for state in agent.stream(payload, config=config, stream_mode="values"):
         final_result = state
-        messages = state.get("messages", [])
+        messages = state.get("messages", []) if isinstance(state, dict) else []
         for message in messages[printed_count:]:
             _print_message(message, output_fn=output_fn)
         printed_count = len(messages)
+    return final_result, printed_count
+
+
+def _prompt_user(prompt_text: str, input_fn=input, output_fn=None) -> str:
+    if output_fn is not None:
+        output_fn(prompt_text)
+        return input_fn("> ")
+    print(prompt_text)
+    return input_fn("> ")
+
+
+def run_once(
+    user_input: str,
+    agent=None,
+    history_writer: ChatHistoryWriter | None = None,
+    output_fn=None,
+    thread_id: str | None = None,
+    input_fn=input,
+):
+    selected_agent = agent or create_common_agent()
+    resolved_thread = thread_id or (history_writer.session_name if history_writer else datetime.now().strftime("%Y%m%d-%H%M%S"))
+    config = {"configurable": {"thread_id": resolved_thread}}
+
+    payload: Any = {"messages": [HumanMessage(content=user_input)]}
+    printed_count = 0
+    final_result: dict = {"messages": []}
+
+    while True:
+        final_result, printed_count = _stream_and_print(
+            selected_agent, payload, config, printed_count, output_fn=output_fn
+        )
+        pending = _extract_pending_interrupts(selected_agent, config)
+        if not pending:
+            break
+        interrupt_value = pending[0]
+        user_response = _prompt_user(_format_interrupt(interrupt_value), input_fn=input_fn, output_fn=output_fn)
+        payload = Command(resume=user_response)
 
     if history_writer is not None:
         history_writer.write_turn(user_input, final_result)
@@ -114,7 +169,12 @@ def run_repl() -> None:
         if not user_input:
             continue
 
-        run_once(user_input, agent=agent, history_writer=history_writer)
+        run_once(
+            user_input,
+            agent=agent,
+            history_writer=history_writer,
+            thread_id=history_writer.session_name,
+        )
 
 
 if __name__ == "__main__":

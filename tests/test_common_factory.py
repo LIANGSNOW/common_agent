@@ -1,34 +1,40 @@
 import unittest
+from unittest.mock import patch
 
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
-from langchain_core.messages import HumanMessage
+from src.agents.common.factory import create_common_agent
+from src.agents.common.state import CommonAgentState
 
-from src.agents.common import create_common_agent
+
+class _FakeGraph:
+    def __init__(self):
+        self.config = None
+
+    def with_config(self, config):
+        self.config = config
+        return self
 
 
 class CommonAgentFactoryTests(unittest.TestCase):
-    def test_common_agent_runs_planner_then_codeact(self):
-        model = FakeListChatModel(
-            responses=[
-                '{"summary":"Add two numbers","steps":["Use Python"],"capabilities":["python"]}',
-                "```python\n<execute>\nprint(2 + 3)\n</execute>\n```",
-                "The answer is 5.",
-            ]
+    def test_common_agent_builds_configured_coordinator(self):
+        fake_graph = _FakeGraph()
+        model = object()
+
+        with (
+            patch("src.agents.common.factory.create_agent", return_value=fake_graph) as create_agent_mock,
+            patch("src.agents.common.factory.build_coordinator_tools", return_value=["tool"]) as tools_mock,
+            patch("src.agents.common.factory.render_system_prompt", return_value="coordinator prompt"),
+        ):
+            result = create_common_agent(model=model, recursion_limit=23)
+
+        self.assertIs(result, fake_graph)
+        self.assertEqual(fake_graph.config, {"recursion_limit": 23})
+        tools_mock.assert_called_once_with(model=model)
+        create_agent_mock.assert_called_once_with(
+            model=model,
+            tools=["tool"],
+            system_prompt="coordinator prompt",
+            state_schema=CommonAgentState,
         )
-
-        agent = create_common_agent(model=model)
-        result = agent.invoke({"messages": [HumanMessage(content="What is 2 + 3?")]})
-
-        self.assertEqual(result["plan"].summary, "Add two numbers")
-        self.assertEqual(result["messages"][-1].content, "The answer is 5.")
-        message_text = "\n".join(str(message.content) for message in result["messages"])
-        self.assertIn("Sandbox code", message_text)
-        self.assertIn("print(2 + 3)", message_text)
-        self.assertIn("Sandbox output", message_text)
-        self.assertIn("5", message_text)
-        self.assertEqual(message_text.count("Plan summary:"), 1)
-        self.assertNotIn("Planner context:", message_text)
-        self.assertIn("codeact_result", result)
 
 
 if __name__ == "__main__":

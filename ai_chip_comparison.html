@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2025-2026 AI推理芯片对比 · 瑞士国际主义风格</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+/* ===== 瑞士国际主义风格 ===== */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: "Helvetica Neue", Helvetica, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+  background: #F5F5F5;
+  color: #1D1D1D;
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+}
+
+/* 网格点阵背景 */
+.slide {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 60px 80px;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle, rgba(0,0,0,0.06) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+.slide.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* 导航箭头 */
+.nav-arrow {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 100;
+  width: 56px; height: 56px;
+  border-radius: 50%;
+  background: rgba(69, 123, 157, 0.15);
+  border: 2px solid #457B9D;
+  color: #457B9D;
+  font-size: 28px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s;
+  user-select: none;
+}
+.nav-arrow:hover { background: #457B9D; color: #fff; }
+.nav-arrow.prev { left: 20px; }
+.nav-arrow.next { right: 20px; }
+.nav-arrow:disabled { opacity: 0.2; cursor: not-allowed; }
+
+/* 页码指示器 */
+.page-indicator {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  display: flex;
+  gap: 10px;
+}
+.dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: #ccc;
+  cursor: pointer;
+  transition: all 0.3s;
+  border: none;
+}
+.dot.active { background: #E63946; transform: scale(1.3); }
+
+/* 页码数字 */
+.page-num {
+  position: fixed;
+  bottom: 28px;
+  right: 40px;
+  z-index: 100;
+  font-size: 14px;
+  color: #999;
+  letter-spacing: 2px;
+}
+
+/* 标题 */
+h1 {
+  font-size: 52px;
+  font-weight: 700;
+  letter-spacing: -1px;
+  margin-bottom: 12px;
+  color: #1D1D1D;
+}
+h1.accent { color: #E63946; }
+h2 {
+  font-size: 36px;
+  font-weight: 600;
+  letter-spacing: -0.5px;
+  margin-bottom: 30px;
+  color: #1D1D1D;
+  border-left: 5px solid #E63946;
+  padding-left: 18px;
+}
+h3 {
+  font-size: 20px;
+  font-weight: 500;
+  color: #457B9D;
+  margin-bottom: 8px;
+}
+.subtitle {
+  font-size: 20px;
+  color: #666;
+  font-weight: 300;
+  letter-spacing: 4px;
+  margin-top: 8px;
+}
+
+/* 封面特殊 */
+.cover {
+  text-align: center;
+}
+.cover h1 { font-size: 64px; margin-bottom: 20px; }
+.cover .subtitle { font-size: 24px; color: #457B9D; letter-spacing: 6px; }
+.cover .date { margin-top: 50px; font-size: 16px; color: #999; letter-spacing: 3px; }
+.cover .accent-line {
+  width: 80px; height: 4px;
+  background: #E63946;
+  margin: 24px auto;
+}
+
+/* 内容布局 */
+.content-row {
+  display: flex;
+  gap: 40px;
+  width: 100%;
+  max-width: 1200px;
+  align-items: center;
+  justify-content: center;
+}
+.chart-container {
+  width: 100%;
+  max-width: 900px;
+  height: 400px;
+  margin: 0 auto;
+}
+.chart-container.tall { height: 480px; }
+.chart-container.wide { max-width: 1000px; }
+
+/* 表格 */
+table {
+  width: 100%;
+  max-width: 1100px;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+th {
+  background: #457B9D;
+  color: #fff;
+  padding: 12px 14px;
+  text-align: center;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+td {
+  padding: 10px 14px;
+  text-align: center;
+  border-bottom: 1px solid #e0e0e0;
+}
+tr:nth-child(even) td { background: #f8f8f8; }
+tr:hover td { background: #eef4f8; }
+td.highlight { color: #E63946; font-weight: 600; }
+td.na { color: #bbb; font-style: italic; }
+
+/* 结论页 */
+.conclusion-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  max-width: 1100px;
+  width: 100%;
+}
+.conclusion-card {
+  background: #fff;
+  border-radius: 8px;
+  padding: 24px 28px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+  border-top: 4px solid #E63946;
+}
+.conclusion-card h3 { margin-bottom: 12px; color: #E63946; }
+.conclusion-card p, .conclusion-card li { font-size: 14px; line-height: 1.8; color: #444; }
+.conclusion-card ul { padding-left: 20px; }
+.conclusion-card li { margin-bottom: 4px; }
+
+/* 规格表滚动 */
+.table-scroll {
+  width: 100%;
+  max-width: 1100px;
+  overflow-x: auto;
+}
+.table-scroll table { min-width: 800px; }
+
+/* 响应式 */
+@media (max-width: 768px) {
+  .slide { padding: 30px 24px; }
+  h1 { font-size: 32px; }
+  .cover h1 { font-size: 36px; }
+  h2 { font-size: 24px; }
+  .content-row { flex-direction: column; gap: 20px; }
+  .chart-container { height: 280px; }
+  .nav-arrow { width: 40px; height: 40px; font-size: 20px; }
+  .conclusion-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- ===== 导航 ===== -->
+<button class="nav-arrow prev" id="prevBtn" onclick="changeSlide(-1)">&#10094;</button>
+<button class="nav-arrow next" id="nextBtn" onclick="changeSlide(1)">&#10095;</button>
+<div class="page-indicator" id="dots"></div>
+<div class="page-num" id="pageNum">01 / 10</div>
+
+<!-- ===== 1. 封面 ===== -->
+<div class="slide cover active" data-index="0">
+  <div class="accent-line"></div>
+  <h1>2025–2026<br>AI 推理芯片对比</h1>
+  <div class="subtitle">NVIDIA B200 · AMD MI325X · 华为昇腾910C · Groq LPU v2</div>
+  <div class="date">2025 年 6 月 · 技术评估报告</div>
+  <div class="accent-line" style="margin-top:40px;"></div>
+  <p style="margin-top:60px; color:#999; font-size:13px; letter-spacing:2px;">← 使用左右箭头翻页 →</p>
+</div>
+
+<!-- ===== 2. 雷达图 ===== -->
+<div class="slide" data-index="1">
+  <h2>综合能力雷达图</h2>
+  <p style="color:#888; margin-bottom:20px; font-size:14px;">FP8算力 · 带宽 · 内存 · 性价比 · 生态成熟度（归一化评分 0–100）</p>
+  <div class="chart-container tall"><canvas id="radarChart"></canvas></div>
+</div>
+
+<!-- ===== 3. FP8算力 ===== -->
+<div class="slide" data-index="2">
+  <h2>FP8 算力对比</h2>
+  <p style="color:#888; margin-bottom:20px; font-size:14px;">单位：TFLOPS（注：B200 为 FP4 标称值 9000，Groq/昇腾为 INT8）</p>
+  <div class="chart-container"><canvas id="flopsChart"></canvas></div>
+</div>
+
+<!-- ===== 4. HBM带宽与容量 ===== -->
+<div class="slide" data-index="3">
+  <h2>HBM 带宽 &amp; 容量</h2>
+  <p style="color:#888; margin-bottom:20px; font-size:14px;">带宽 (TB/s) · 容量 (GB) — Groq LPU v2 使用 SRAM 150 MB</p>
+  <div class="chart-container"><canvas id="hbmChart"></canvas></div>
+</div>
+
+<!-- ===== 5. 功耗 ===== -->
+<div class="slide" data-index="4">
+  <h2>功耗对比</h2>
+  <p style="color:#888; margin-bottom:20px; font-size:14px;">典型功耗 (W) — 越低越好</p>
+  <div class="chart-container"><canvas id="powerChart"></canvas></div>
+</div>
+
+<!-- ===== 6. 成本 ===== -->
+<div class="slide" data-index="5">
+  <h2>成本对比</h2>
+  <p style="color:#888; margin-bottom:20px; font-size:14px;">单价估算 (USD) — 对数尺度</p>
+  <div class="chart-container"><canvas id="costChart"></canvas></div>
+</div>
+
+<!-- ===== 7. 实测推理性能表 ===== -->
+<div class="slide" data-index="6">
+  <h2>实测推理性能</h2>
+  <p style="color:#888; margin-bottom:20px; font-size:14px;">Llama-70B / DeepSeek-V3 吞吐量 &amp; Token 成本</p>
+  <table>
+    <thead>
+      <tr><th>芯片</th><th>Llama-70B (tokens/s)</th><th>DeepSeek-V3 (tokens/s)</th><th>Token 成本 ($/M)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>NVIDIA B200</strong></td><td class="highlight">59000 <span style="font-size:11px;color:#888;">(厂商)</span></td><td>334 <span style="font-size:11px;color:#888;">(R1)</span></td><td class="na">N/A</td></tr>
+      <tr><td><strong>AMD MI325X</strong></td><td class="na">N/A</td><td class="na">N/A</td><td class="na">N/A</td></tr>
+      <tr><td><strong>华为昇腾910C</strong></td><td class="na">N/A</td><td>89 <span style="font-size:11px;color:#888;">(API)</span></td><td class="na">N/A</td></tr>
+      <tr><td><strong>Groq LPU v2</strong></td><td>284 <span style="font-size:11px;color:#888;">(实测)</span></td><td class="na">N/A</td><td>0.59 / 0.79</td></tr>
+    </tbody>
+  </table>
+  <p style="margin-top:16px; font-size:12px; color:#999;">注：B200 的 Llama-70B 数据为厂商标称值；Groq 的 token 成本为 $0.59/M（输入）/ $0.79/M（输出）</p>
+</div>
+
+<!-- ===== 8. 完整规格表 ===== -->
+<div class="slide" data-index="7">
+  <h2>完整规格参数</h2>
+  <div class="table-scroll">
+  <table>
+    <thead>
+      <tr><th>芯片</th><th>FP8 算力 (TFLOPS)</th><th>HBM 带宽 (TB/s)</th><th>内存容量 (GB)</th><th>功耗 (W)</th><th>单价估算 ($)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>NVIDIA B200</strong></td><td>9000 <span style="font-size:11px;color:#888;">(FP4)</span></td><td class="highlight">8.0</td><td>192</td><td>1100</td><td>50,000</td></tr>
+      <tr><td><strong>AMD MI325X</strong></td><td class="highlight">2615</td><td>6.0</td><td class="highlight">256</td><td>1000</td><td class="highlight">15,000</td></tr>
+      <tr><td><strong>华为昇腾910C</strong></td><td>320 <span style="font-size:11px;color:#888;">(INT8)</span></td><td>3.2</td><td>64</td><td class="highlight">200</td><td>20,000 <span style="font-size:11px;color:#888;">(估)</span></td></tr>
+      <tr><td><strong>Groq LPU v2</strong></td><td>750 <span style="font-size:11px;color:#888;">(INT8)</span></td><td>150 <span style="font-size:11px;color:#888;">(SRAM)</span></td><td>0.5</td><td>300 <span style="font-size:11px;color:#888;">(估)</span></td><td class="na">N/A</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p style="margin-top:16px; font-size:12px; color:#999;">注：B200 为 FP4 算力；Groq 带宽为 SRAM 内部带宽，非 HBM；昇腾 910C 价格为市场估算</p>
+</div>
+
+<!-- ===== 9. 供货与生态 ===== -->
+<div class="slide" data-index="8">
+  <h2>供货与生态现状</h2>
+  <div class="conclusion-grid">
+    <div class="conclusion-card" style="border-top-color:#457B9D;">
+      <h3 style="color:#457B9D;">NVIDIA B200</h3>
+      <p><strong>供货：</strong>2025 H2 量产，供不应求，交期 12–20 周</p>
+      <p><strong>生态：</strong>CUDA / TensorRT / Triton 最成熟，PyTorch 原生支持</p>
+      <p><strong>限制：</strong>对华出口管制（EAR），价格昂贵</p>
+    </div>
+    <div class="conclusion-card" style="border-top-color:#457B9D;">
+      <h3 style="color:#457B9D;">AMD MI325X</h3>
+      <p><strong>供货：</strong>2024 Q4 发布，批量供应中</p>
+      <p><strong>生态：</strong>ROCm 持续追赶，支持 PyTorch / TensorFlow</p>
+      <p><strong>优势：</strong>性价比突出，256GB HBM3E 大容量</p>
+    </div>
+    <div class="conclusion-card" style="border-top-color:#457B9D;">
+      <h3 style="color:#457B9D;">华为昇腾 910C</h3>
+      <p><strong>供货：</strong>国内供应稳定，受制裁影响海外不可用</p>
+      <p><strong>生态：</strong>CANN / MindSpore 国内生态，PyTorch 适配中</p>
+      <p><strong>优势：</strong>功耗极低 (200W)，国产替代首选</p>
+    </div>
+    <div class="conclusion-card" style="border-top-color:#457B9D;">
+      <h3 style="color:#457B9D;">Groq LPU v2</h3>
+      <p><strong>供货：</strong>早期客户阶段，大规模量产待定</p>
+      <p><strong>生态：</strong>自研 LPU 架构，兼容部分 ONNX 模型</p>
+      <p><strong>特色：</strong>极低延迟推理，SRAM 架构消除 HBM 瓶颈</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 10. 结论与建议 ===== -->
+<div class="slide" data-index="9">
+  <h2>结论与建议</h2>
+  <div class="conclusion-grid">
+    <div class="conclusion-card">
+      <h3>🏆 综合推荐</h3>
+      <ul>
+        <li><strong>NVIDIA B200</strong> — 极致性能，适合大规模云端推理集群，预算充足首选</li>
+        <li><strong>AMD MI325X</strong> — 最佳性价比，256GB 大内存适合长上下文模型</li>
+        <li><strong>华为昇腾 910C</strong> — 国产替代最优解，低功耗适合边缘/信创场景</li>
+        <li><strong>Groq LPU v2</strong> — 低延迟推理新锐，适合实时交互应用</li>
+      </ul>
+    </div>
+    <div class="conclusion-card">
+      <h3>📊 关键发现</h3>
+      <ul>
+        <li>B200 的 FP4 算力遥遥领先，但价格是 MI325X 的 3 倍以上</li>
+        <li>MI325X 的 256GB 内存容量最大，适合大模型推理</li>
+        <li>昇腾 910C 功耗仅为 B200 的 18%，性能/功耗比突出</li>
+        <li>Groq 的 SRAM 架构在延迟敏感场景有独特优势</li>
+        <li>生态成熟度：NVIDIA &gt; AMD &gt; 华为 &gt; Groq</li>
+      </ul>
+    </div>
+    <div class="conclusion-card" style="grid-column: 1 / -1;">
+      <h3>🎯 建议策略</h3>
+      <p style="font-size:14px; line-height:1.8;">
+        <strong>短期（2025）：</strong>以 NVIDIA B200 构建核心推理集群，AMD MI325X 作为容量扩展节点。<br>
+        <strong>中期（2025–2026）：</strong>关注 Groq LPU v2 量产进展，评估低延迟场景替代方案；国内客户优先部署昇腾 910C。<br>
+        <strong>长期：</strong>构建多云多架构推理平台，避免单一供应商锁定。
+      </p>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== 导航逻辑 =====
+let current = 0;
+const slides = document.querySelectorAll('.slide');
+const total = slides.length;
+const dotsContainer = document.getElementById('dots');
+const pageNum = document.getElementById('pageNum');
+
+// 生成点
+for (let i = 0; i < total; i++) {
+  const dot = document.createElement('button');
+  dot.className = 'dot' + (i === 0 ? ' active' : '');
+  dot.onclick = () => goToSlide(i);
+  dotsContainer.appendChild(dot);
+}
+
+function goToSlide(idx) {
+  slides.forEach((s, i) => s.classList.toggle('active', i === idx));
+  document.querySelectorAll('.dot').forEach((d, i) => d.classList.toggle('active', i === idx));
+  current = idx;
+  pageNum.textContent = String(idx + 1).padStart(2, '0') + ' / ' + String(total).padStart(2, '0');
+  document.getElementById('prevBtn').disabled = idx === 0;
+  document.getElementById('nextBtn').disabled = idx === total - 1;
+}
+
+function changeSlide(dir) {
+  const next = Math.max(0, Math.min(total - 1, current + dir));
+  if (next !== current) goToSlide(next);
+}
+
+// 键盘支持
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft') changeSlide(-1);
+  if (e.key === 'ArrowRight') changeSlide(1);
+});
+
+// ===== Chart.js 图表 =====
+const accent = '#E63946';
+const accent2 = '#457B9D';
+const colors = [accent, accent2, '#2A9D8F', '#E9C46A'];
+const chipNames = ['NVIDIA B200', 'AMD MI325X', '华为昇腾910C', 'Groq LPU v2'];
+
+// 2. 雷达图
+new Chart(document.getElementById('radarChart'), {
+  type: 'radar',
+  data: {
+    labels: ['FP8 算力', '内存带宽', '内存容量', '性价比', '生态成熟度', '功耗效率'],
+    datasets: chipNames.map((name, i) => ({
+      label: name,
+      data: [
+        [100, 100, 75, 20, 100, 25][i],
+        [65, 75, 100, 85, 60, 30][i],
+        [30, 40, 25, 50, 45, 100][i],
+        [40, 95, 5, 60, 20, 80][i]
+      ][i],
+      borderColor: colors[i],
+      backgroundColor: colors[i] + '22',
+      borderWidth: 2,
+      pointBackgroundColor: colors[i],
+      pointRadius: 4
+    }))
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    scales: {
+      r: {
+        min: 0,
+        max: 100,
+        ticks: { stepSize: 20, backdropColor: 'transparent', font: { size: 11 } },
+        grid: { color: 'rgba(0,0,0,0.08)' },
+        angleLines: { color: 'rgba(0,0,0,0.08)' },
+        pointLabels: { font: { size: 13, family: 'Helvetica, sans-serif' } }
+      }
+    },
+    plugins: {
+      legend: { position: 'bottom', labels: { font: { size: 12 }, padding: 16 } }
+    }
+  }
+});
+
+// 3. FP8算力柱状图
+new Chart(document.getElementById('flopsChart'), {
+  type: 'bar',
+  data: {
+    labels: chipNames,
+    datasets: [{
+      label: 'FP8 / FP4 / INT8 算力 (TFLOPS)',
+      data: [9000, 2615, 320, 750],
+      backgroundColor: colors,
+      borderRadius: 4
+    }]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    scales: {
+      y: {
+        beginAtZero: true,
+        title: { display: true, text: 'TFLOPS', font: { size: 13 } },
+        ticks: { callback: v => v >= 1000 ? (v/1000).toFixed(0) + 'K' : v }
+      }
+    },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          label: ctx => ctx.raw + ' TFLOPS' + (ctx.dataIndex === 0 ? ' (FP4)' : ctx.dataIndex === 2 || ctx.dataIndex === 3 ? ' (INT8)' : '')
+        }
+      }
+    }
+  }
+});
+
+// 4. HBM带宽与容量（组合图）
+new Chart(document.getElementById('hbmChart'), {
+  type: 'bar',
+  data: {
+    labels: chipNames,
+    datasets: [
+      {
+        label: '带宽 (TB/s)',
+        data: [8.0, 6.0, 3.2, 150],
+        backgroundColor: accent,
+        borderRadius: 4,
+        yAxisID: 'y'
+      },
+      {
+        label: '容量 (GB)',
+        data: [192, 256, 64, 0.5],
+        backgroundColor: accent2,
+        borderRadius: 4,
+        yAxisID: 'y1'
+      }
+    ]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    scales: {
+      y: {
+        type: 'linear',
+        position: 'left',
+        title: { display: true, text: '带宽 (TB/s)', font: { size: 12 } },
+        beginAtZero: true
+      },
+      y1: {
+        type: 'linear',
+        position: 'right',
+        title: { display: true, text: '容量 (GB)', font: { size: 12 } },
+        beginAtZero: true,
+        grid: { drawOnChartArea: false }
+      }
+    },
+    plugins: {
+      legend: { position: 'bottom', labels: { font: { size: 12 }, padding: 16 } },
+      tooltip: {
+        callbacks: {
+          label: ctx => ctx.dataset.label + ': ' + ctx.raw + (ctx.datasetIndex === 0 ? ' TB/s' : ' GB')
+        }
+      }
+    }
+  }
+});
+
+// 5. 功耗
+new Chart(document.getElementById('powerChart'), {
+  type: 'bar',
+  data: {
+    labels: chipNames,
+    datasets: [{
+      label: '功耗 (W)',
+      data: [1100, 1000, 200, 300],
+      backgroundColor: ['#E63946', '#E65A5A', '#2A9D8F', '#E9C46A'],
+      borderRadius: 4
+    }]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    indexAxis: 'y',
+    scales: {
+      x: { beginAtZero: true, title: { display: true, text: '功耗 (W)', font: { size: 13 } } }
+    },
+    plugins: {
+      legend: { display: false },
+      tooltip: { callbacks: { label: ctx => ctx.raw + ' W' } }
+    }
+  }
+});
+
+// 6. 成本
+new Chart(document.getElementById('costChart'), {
+  type: 'bar',
+  data: {
+    labels: chipNames,
+    datasets: [{
+      label: '单价估算 (USD)',
+      data: [50000, 15000, 20000, null],
+      backgroundColor: colors,
+      borderRadius: 4
+    }]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    scales: {
+      y: {
+        type: 'logarithmic',
+        title: { display: true, text: 'USD (对数尺度)', font: { size: 13 } },
+        ticks: { callback: v => '$' + (v >= 1000 ? (v/1000).toFixed(0) + 'K' : v) },
+        min: 1000
+      }
+    },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          label: ctx => ctx.raw ? '$' + ctx.raw.toLocaleString() : 'N/A (未公开)'
+        }
+      }
+    }
+  }
+});
+
+// 初始化
+goToSlide(0);
+</script>
+</body>
+</html>
